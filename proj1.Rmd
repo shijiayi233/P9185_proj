@@ -1,0 +1,113 @@
+---
+title: "proj1"
+author: "Jiayi Shi"
+date: "2025-02-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+echo = FALSE,
+warning = FALSE,
+message=F,
+fig.width = 6,
+fig.asp = .6,
+out.width = "90%")
+library(tidyverse)
+theme_set(theme_minimal())
+library(nlme)
+library(table1)
+library(gtsummary)
+```
+
+```{r}
+data = read.csv("data.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(treatment_group = case_when(
+    treatment_group == "A" ~ "placebo",
+    treatment_group == "B" ~ "low",
+    treatment_group == "C" ~ "high",
+    TRUE ~ treatment_group  # Keeps other values unchanged if any
+  )) #A placebo, B low dose, C high dose
+
+print(paste("Number of subjects", length(unique(data$subject_id))))
+
+
+table(data$treatment_group, data$day)
+
+# Count the number of subjects per day
+data %>%
+  group_by(day) %>%
+  summarise(num_subjects = n_distinct(subject_id))
+
+#check missing values
+colSums(is.na(data))
+
+# Define expected days
+expected_days <- c(0, 5, 19, 90)
+
+# Find subjects with missing days
+missing_data <- data %>%
+  group_by(subject_id) %>%
+  summarise(missing_days = list(setdiff(expected_days, day))) %>%
+  filter(lengths(missing_days) > 0)
+
+# Create all possible subject-day combinations
+all_combinations <- expand.grid(subject_id = unique(data$subject_id), day = expected_days)
+
+# Merge with the original dataset to identify missing rows (NA)
+complete_data <- full_join(all_combinations, data, by = c("subject_id", "day"))
+
+# Impute missing values of covariates: apply Last Observation Carried Forward (LOCF) to age, gender, and treatment_group
+library(zoo)
+complete_data = complete_data %>% 
+  arrange(subject_id, day) %>%  # Ensure data is sorted by subject and time
+  group_by(subject_id) %>%      # LOCF should be applied within each subject
+  mutate(
+    age = na.locf(age, na.rm = FALSE),
+    gender = na.locf(gender, na.rm = FALSE),
+    treatment_group = na.locf(treatment_group, na.rm = FALSE)
+  ) %>%
+  ungroup()
+```
+
+We can see the patterns of missing data is intermittent missingness (non-monotone missingness). 
+
+# Exploratory Data Analysis (EDA)
+
+```{r}
+# Plot mem_comp over time by treatment group
+ggplot(data, aes(x = factor(day), y = mem_comp, color = treatment_group)) +
+  geom_boxplot() +
+  labs(title = "Memory Scores Over Time by Treatment Group",
+       x = "Day",
+       y = "MEM_comp Score",
+       color = "Treatment Group")
+```
+
+## complete-case analysis
+
+```{r}
+# Subjects with day 90 data
+complete_data = complete_data %>%
+  group_by(subject_id) %>%
+  mutate(completer = ifelse(any(day == 90 & !is.na(mem_comp)), 1, 0)) %>%
+  ungroup()
+
+# Keep only subjects with 4 rows (days 0, 5, 19, 90)
+complete_cases = data %>%
+  group_by(subject_id) %>%
+  filter(n() == 4) %>% 
+  ungroup()
+
+# Check the number of subjects after excluding incomplete cases
+print(paste("Number of subjects after excluding incomplete cases:", length(unique(complete_cases$subject_id))))
+```
+
+# Missing values: Sensitivity analysis 
+## Imputation
+
+## Inverse-probability Weighting available-data GEE
+
+## Likelihood-based methods
+
